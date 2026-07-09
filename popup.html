@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <img class="logo" src="icons/icon32.png" alt="" />
+      <h1 class="title">Jira Mod</h1>
+    </header>
+
+    <label class="row" for="enabled">
+      <span class="row-text">
+        <span class="row-label">Ẩn trường không bắt buộc</span>
+        <span class="row-hint">Chỉ hiện trường bắt buộc trong dialog transition</span>
+      </span>
+      <span class="switch">
+        <input type="checkbox" id="enabled" />
+        <span class="slider"></span>
+      </span>
+    </label>
+
+    <p class="footer">
+      Chỉ hoạt động trên các dialog chuyển trạng thái (Resolve, Close…).
+    </p>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
