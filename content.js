@@ -16,6 +16,34 @@
   var SHOW_TEXT = "Hiện các trường không bắt buộc";
   var HIDE_TEXT = "Ẩn các trường không bắt buộc";
 
+  /*
+   * Auto-fill defaults for the BUG Resolve dialog.
+   *
+   * Each entry maps a field by its (normalized) label to the value we want.
+   * A field is only filled when it is still EMPTY / "not chosen", and each
+   * field is touched at most once, so a value the user later changes or clears
+   * is never overwritten. For <select> the value is matched against option
+   * text (or option value); for text inputs / textareas it is set verbatim.
+   *
+   * Labels/values live here so they are easy to edit without touching logic.
+   */
+  var AUTO_FILL = [
+    { label: "Resolution", value: "Fixed" },
+    { label: "Defect Origin", value: "Coding" },
+    { label: "Defect Type", value: "Cod_Coding Standard" },
+    { label: "Cause Category", value: "CAR_Carelessness" },
+    { label: "Direct Cause of Defect", value: "Design thiếu mô tả hoặc mô tả chưa rõ" },
+    { label: "Correction Action", value: "Check và fix theo đúng yêu cầu mô tả" }
+  ];
+
+  // Labels that mark the form as a *bug* Resolve (so we do not force Resolution
+  // = Fixed on ordinary transition dialogs that lack these defect fields).
+  var BUG_MARKER_LABELS = ["defect origin", "defect type", "cause category"];
+
+  // Two fields to lay out side by side (left, right) on the bug Resolve dialog.
+  // The dialog is also widened so both columns have room. Matched by label.
+  var PAIR_LABELS = ["direct cause of defect", "correction action"];
+
   var enabled = true; // Master switch, persisted in chrome.storage.
   var observer = new MutationObserver(schedule);
 
@@ -89,6 +117,174 @@
     return button;
   }
 
+  // Normalize a string for matching: collapse whitespace, trim, lowercase.
+  function norm(s) {
+    return (s || "").replace(/\s+/g, " ").trim().toLowerCase();
+  }
+
+  // The label text of a field-group, minus the required-icon / error markers.
+  // Jira marks "required" two ways: an .icon-required span AND a
+  // .visually-hidden "Required" text node — strip both, plus a trailing
+  // "required" word as a belt-and-braces fallback.
+  function fieldLabel(fieldGroup) {
+    var label = fieldGroup.querySelector("label");
+    if (!label) return "";
+    var clone = label.cloneNode(true);
+    clone
+      .querySelectorAll(
+        ".aui-icon, .icon-required, .error, .description, .visually-hidden"
+      )
+      .forEach(function (n) {
+        n.remove();
+      });
+    return norm(clone.textContent).replace(/\s*required$/, "");
+  }
+
+  // The primary editable control inside a field-group. Prefer the real <select>
+  // (for select2 fields it is present but hidden and comes AFTER the select2
+  // helper <input>s in the DOM, so a combined selector would wrongly pick the
+  // helper). Then textarea, then a plain text input (never a select2 helper).
+  function fieldControl(fieldGroup) {
+    return (
+      fieldGroup.querySelector("select") ||
+      fieldGroup.querySelector("textarea") ||
+      fieldGroup.querySelector(
+        "input[type='text']:not(.select2-input):not(.select2-focusser), input:not([type])"
+      )
+    );
+  }
+
+  // Fire the events Jira / the Behaviours plugin listen for. Dispatched native
+  // events reach page-side jQuery handlers too (they share the DOM/event system).
+  function fireEvents(el) {
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  // A <select> counts as "not chosen" when it sits on a placeholder / None option.
+  function isSelectEmpty(sel) {
+    if (sel.selectedIndex < 0) return true;
+    var v = norm(sel.value);
+    if (v === "" || v === "-1") return true;
+    var opt = sel.options[sel.selectedIndex];
+    var t = norm(opt ? opt.textContent : "");
+    return t === "" || t === "none" || t === "-- none --" || t === "select...";
+  }
+
+  // Select the option whose text (or value) matches want. Returns true if set.
+  function setSelect(sel, want) {
+    var wanted = norm(want);
+    var chosen = null;
+    var i;
+    for (i = 0; i < sel.options.length; i++) {
+      if (
+        norm(sel.options[i].textContent) === wanted ||
+        norm(sel.options[i].value) === wanted
+      ) {
+        chosen = sel.options[i];
+        break;
+      }
+    }
+    if (!chosen) {
+      // Looser fallback: an option that starts with the wanted text.
+      for (i = 0; i < sel.options.length; i++) {
+        if (norm(sel.options[i].textContent).indexOf(wanted) === 0) {
+          chosen = sel.options[i];
+          break;
+        }
+      }
+    }
+    if (!chosen) return false;
+    sel.value = chosen.value;
+    fireEvents(sel);
+    return true;
+  }
+
+  // True only when the form is a bug Resolve (has the defect-specific fields).
+  function looksLikeBugResolve(form) {
+    var groups = form.querySelectorAll(".field-group");
+    for (var i = 0; i < groups.length; i++) {
+      if (BUG_MARKER_LABELS.indexOf(fieldLabel(groups[i])) !== -1) return true;
+    }
+    return false;
+  }
+
+  /*
+   * Fill each configured field once, if empty. Runs on every scan so fields
+   * that Behaviours reveals later (e.g. Cause Category after Defect Type) still
+   * get filled when they appear. A per-control marker guarantees we never touch
+   * a field twice, so user edits are preserved and we cannot loop.
+   */
+  function autoFillForm(form) {
+    if (!looksLikeBugResolve(form)) return;
+    form.querySelectorAll(".field-group").forEach(function (fieldGroup) {
+      var labelText = fieldLabel(fieldGroup);
+      if (!labelText) return;
+
+      // Exact match only: a startsWith match would also catch the optional
+      // "... (translated)" twin fields, which we must leave untouched.
+      var entry = null;
+      for (var i = 0; i < AUTO_FILL.length; i++) {
+        if (labelText === norm(AUTO_FILL[i].label)) {
+          entry = AUTO_FILL[i];
+          break;
+        }
+      }
+      if (!entry) return;
+
+      var el = fieldControl(fieldGroup);
+      if (!el || el.dataset.jiraModFilled) return;
+      el.dataset.jiraModFilled = "1"; // Touch each control at most once.
+
+      if (el.tagName === "SELECT") {
+        if (isSelectEmpty(el)) setSelect(el, entry.value);
+      } else if (norm(el.value) === "") {
+        el.value = entry.value;
+        fireEvents(el);
+      }
+    });
+  }
+
+  // Find the (first) field-group in a form whose label matches exactly.
+  function findGroupByLabel(form, wantLabel) {
+    var groups = form.querySelectorAll(".field-group");
+    for (var i = 0; i < groups.length; i++) {
+      if (fieldLabel(groups[i]) === wantLabel) return groups[i];
+    }
+    return null;
+  }
+
+  /*
+   * Widen the bug Resolve dialog and place the two PAIR_LABELS field-groups side
+   * by side in a flex row. The two fields are not adjacent in the DOM (an
+   * optional "(translated)" field sits between them), so we move them into a
+   * wrapper. The editors are contenteditable (not iframes), so relocating the
+   * nodes preserves their content. Idempotent, and re-pairs if Behaviours
+   * re-renders and drops our wrapper.
+   */
+  function enhanceLayout(form) {
+    if (!looksLikeBugResolve(form)) return;
+
+    var dialog = form.closest(".aui-dialog2, .jira-dialog2");
+    if (dialog) dialog.classList.add("jira-mod-wide");
+
+    var left = findGroupByLabel(form, PAIR_LABELS[0]);
+    var right = findGroupByLabel(form, PAIR_LABELS[1]);
+    if (!left || !right) return;
+
+    var pair = form.querySelector(".jira-mod-pair");
+    if (pair && pair.contains(left) && pair.contains(right)) return; // already paired
+
+    if (!pair) {
+      pair = document.createElement("div");
+      pair.className = "jira-mod-pair";
+    }
+    // Anchor the row where the left field currently sits, then move both in.
+    left.parentNode.insertBefore(pair, left);
+    pair.appendChild(left);
+    pair.appendChild(right);
+  }
+
   function processForm(form) {
     var info = syncFields(form);
     if (!form.querySelectorAll(".field-group").length) {
@@ -108,6 +304,12 @@
     // Keep the counter/label in sync (optional count can change via Behaviours).
     form.dataset.jiraModOptional = String(info.optionalCount);
     if (button) updateButtonLabel(form, button, info.optionalCount);
+
+    // Fill the bug-resolve defaults (no-op on non-bug dialogs / filled fields).
+    autoFillForm(form);
+
+    // Widen the dialog and pair the two fields side by side (bug resolve only).
+    enhanceLayout(form);
   }
 
   // Undo every change on a form: remove the button, classes and markers.
@@ -118,6 +320,16 @@
     form.querySelectorAll(".field-group").forEach(function (fieldGroup) {
       fieldGroup.classList.remove("jira-mod-optional", "jira-mod-hidden");
     });
+    form.querySelectorAll("[data-jira-mod-filled]").forEach(function (el) {
+      delete el.dataset.jiraModFilled;
+    });
+    // Undo the side-by-side layout: move the paired fields back out, drop wrapper.
+    form.querySelectorAll(".jira-mod-pair").forEach(function (pair) {
+      while (pair.firstChild) pair.parentNode.insertBefore(pair.firstChild, pair);
+      pair.remove();
+    });
+    var dialog = form.closest(".aui-dialog2, .jira-dialog2");
+    if (dialog) dialog.classList.remove("jira-mod-wide");
     delete form.dataset.jiraModProcessed;
     delete form.dataset.jiraModOptional;
   }

@@ -38,3 +38,55 @@ form[data-jira-mod-processed].jira-mod-show-optional .jira-mod-optional {
 form.jira-mod-show-optional .jira-mod-toggle::before {
   content: "\25BE "; /* ▾ */
 }
+
+/* --- Bug Resolve layout: widen the dialog and pair two fields side by side ---
+ * The dialog centres itself with auto left/right margins, so overriding only
+ * the width keeps it centred. Two-class selector out-specifies aui-dialog2-large.
+ */
+.aui-dialog2.jira-mod-wide {
+  width: 1140px;
+  max-width: 92vw;
+}
+
+/* Row that holds "Direct Cause of Defect" (left) and "Correction Action" (right). */
+.jira-mod-pair {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+/* Jira sets padding-left:145px to reserve a left label column; drop it here so
+ * the editor uses the full column width. !important beats Jira's id-scoped rule. */
+.jira-mod-pair > .field-group {
+  flex: 1 1 0;
+  min-width: 0; /* allow the columns to shrink instead of overflowing */
+  padding-left: 0 !important;
+}
+
+/* Label ABOVE the input (stacked) instead of Jira's default label-on-the-left,
+ * so the narrow column is used fully by the editor. */
+.jira-mod-pair > .field-group > label {
+  display: block !important;
+  float: none !important;
+  width: auto !important;
+  margin: 0 0 4px 0 !important;
+  text-align: left !important;
+}
+
+/* Jira's required marker is an absolutely-positioned sprite icon tuned for the
+ * old label-on-the-left layout; hide it and show a plain red asterisk inline. */
+.jira-mod-pair > .field-group > label .icon-required {
+  display: none !important;
+}
+.jira-mod-pair > .field-group > label::after {
+  content: " *";
+  color: #de350b;
+  font-weight: bold;
+}
+
+/* Stretch each field's editor to fill its half of the row. */
+.jira-mod-pair > .field-group .jira-wikifield,
+.jira-mod-pair > .field-group textarea {
+  width: 100%;
+  box-sizing: border-box;
+}

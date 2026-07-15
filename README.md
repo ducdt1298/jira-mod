@@ -7,6 +7,7 @@ Chrome extension (Manifest V3) cho Jira Data Center (`insight.fsoft.com.vn/jirad
 - Tự động ẩn mọi trường **không bắt buộc** trong dialog transition.
 - Nút **"Hiện các trường không bắt buộc (N)"** để bung/thu các trường optional.
 - Tự động hiện lại trường vừa trở thành **bắt buộc động** (Jira Behaviours plugin) — không bao giờ để trường required bị ẩn.
+- **Tự động điền mặc định khi Resolve bug**: nếu trường còn trống (chưa chọn) sẽ tự điền — Resolution = `Fixed`, Defect Origin = `Coding`, Defect Type = `Cod_Coding Standard`, Cause Category = `CAR_Carelessness`, Direct Cause of Defect = `Design thiếu mô tả hoặc mô tả chưa rõ`, Correction Action = `Check và fix theo đúng yêu cầu mô tả`. Chỉ áp dụng cho dialog có các trường defect (bug), điền **một lần** và **không** ghi đè giá trị bạn tự sửa. Sửa danh sách này ở mảng `AUTO_FILL` trong `content.js`.
 - Công tắc bật/tắt trong popup (biểu tượng extension trên thanh công cụ), lưu trạng thái và áp dụng ngay lập tức.
 
 ## Cài đặt (Load unpacked)
