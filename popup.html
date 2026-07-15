@@ -9,6 +9,7 @@
     <header class="header">
       <img class="logo" src="icons/icon32.png" alt="" />
       <h1 class="title">Jira Mod</h1>
+      <span class="version" id="version"></span>
     </header>
 
     <label class="row" for="enabled">
@@ -21,6 +22,44 @@
         <span class="slider"></span>
       </span>
     </label>
+
+    <section class="card">
+      <h2 class="card-title">AI adapter</h2>
+      <p class="card-hint">Dùng cho nút “✨ Gợi ý bằng AI” khi Resolve bug.</p>
+
+      <label class="field" for="adapterUrl">
+        <span class="field-label">Adapter URL</span>
+        <input
+          type="text"
+          id="adapterUrl"
+          class="field-input"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="http://127.0.0.1:4924"
+        />
+        <span class="field-error" id="adapterUrlError"></span>
+      </label>
+
+      <label class="field" for="timeoutSec">
+        <span class="field-label">Timeout (giây)</span>
+        <input
+          type="number"
+          id="timeoutSec"
+          class="field-input field-input--num"
+          min="5"
+          max="120"
+          step="1"
+        />
+      </label>
+
+      <div class="test-row">
+        <button type="button" id="testBtn" class="test-btn">Kiểm tra kết nối</button>
+        <span class="status" id="status">
+          <span class="status-dot" id="statusDot"></span>
+          <span class="status-text" id="statusText"></span>
+        </span>
+      </div>
+    </section>
 
     <p class="footer">
       Chỉ hoạt động trên các dialog chuyển trạng thái (Resolve, Close…).

@@ -3,7 +3,7 @@
 }
 
 body {
-  width: 280px;
+  width: 300px;
   margin: 0;
   padding: 14px 16px 12px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial,
@@ -29,6 +29,13 @@ body {
   font-size: 15px;
   font-weight: 600;
   margin: 0;
+}
+
+/* Version badge next to the title. */
+.version {
+  margin-left: auto;
+  font-size: 11px;
+  color: #6b778c;
 }
 
 .row {
@@ -99,6 +106,158 @@ body {
 
 .switch input:checked + .slider::before {
   transform: translateX(16px);
+}
+
+/* AI adapter configuration card. */
+.card {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #dfe1e6;
+  border-radius: 6px;
+}
+
+.card-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.card-hint {
+  margin: 2px 0 10px;
+  font-size: 11px;
+  color: #6b778c;
+  line-height: 1.4;
+}
+
+.field {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.field-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  font-size: 13px;
+  color: #172b4d;
+  border: 1px solid #dfe1e6;
+  border-radius: 4px;
+  background: #fafbfc;
+}
+
+.field-input:focus {
+  outline: none;
+  border-color: #2684ff;
+  background: #ffffff;
+  box-shadow: 0 0 0 1px #2684ff;
+}
+
+.field-input--num {
+  width: 90px;
+}
+
+.field-input.is-invalid {
+  border-color: #de350b;
+}
+
+.field-error {
+  display: none;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #de350b;
+}
+
+.field-error.is-shown {
+  display: block;
+}
+
+/* Test-connection row: button + status. */
+.test-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.test-btn {
+  flex: 0 0 auto;
+  background: #0052cc;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.test-btn:hover {
+  background: #0747a6;
+}
+
+.test-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  color: #6b778c;
+}
+
+.status-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #b3bac5;
+}
+
+/* State colours mirror content.css: green ok, amber warning, red error. */
+.status.is-ok .status-dot {
+  background: #006644;
+}
+.status.is-ok .status-text {
+  color: #006644;
+}
+
+.status.is-warn .status-dot {
+  background: #ff8b00;
+}
+.status.is-warn .status-text {
+  color: #974f00;
+}
+
+.status.is-error .status-dot {
+  background: #de350b;
+}
+.status.is-error .status-text {
+  color: #de350b;
+}
+
+/* Loading spinner reused from the content-script AI button. */
+.status.is-loading .status-dot {
+  border: 2px solid rgba(0, 82, 204, 0.3);
+  border-top-color: #0052cc;
+  background: none;
+  box-sizing: border-box;
+  animation: popup-spin 0.7s linear infinite;
+}
+
+@keyframes popup-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .footer {

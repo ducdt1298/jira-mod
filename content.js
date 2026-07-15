@@ -49,6 +49,7 @@
   var AI_BTN_LABEL = "✨ Gợi ý bằng AI"; // ✨ Gợi ý bằng AI
   var AI_SUMMARY_MAX = 400; // chars of #summary-val sent as context
   var AI_DESC_MAX = 4000; // chars of #description-val sent as context
+  var AI_HEALTH_TIMEOUT_MS = 5000; // fast pre-flight probe before the chat call
   // Two example values that anchor the AI's language / length / style.
   var AI_EXAMPLE_DIRECT = "Design thiếu mô tả hoặc mô tả chưa rõ";
   var AI_EXAMPLE_CORRECTION = "Check và fix theo đúng yêu cầu mô tả";
@@ -401,6 +402,25 @@
     });
   }
 
+  // Fast readiness probe through the background worker. Resolves with the
+  // health payload ({status, auth:{configured}}) or rejects with a shaped
+  // error. Lets the AI button report a stopped/unauthed adapter in ~5s instead
+  // of waiting out the full chat timeout.
+  function sendHealth() {
+    return new Promise(function (resolve, reject) {
+      chrome.runtime.sendMessage(
+        { action: "aiHealth", timeoutMs: AI_HEALTH_TIMEOUT_MS },
+        function (resp) {
+          if (chrome.runtime.lastError) {
+            return reject({ code: "runtime", message: chrome.runtime.lastError.message });
+          }
+          if (!resp || !resp.ok) return reject((resp && resp.error) || { code: "network" });
+          resolve(resp.health);
+        }
+      );
+    });
+  }
+
   // Pull a JSON object out of possibly-chatty model text (strip ``` fences,
   // slice from first { to last }).
   function extractJson(text) {
@@ -510,16 +530,26 @@
 
     btn.addEventListener("click", function () {
       if (btn.disabled) return;
-      setAiState(bar, "loading", "Đang tạo gợi ý…");
-      requestSuggestion(gatherBugContext(form)).then(
-        function (s) {
-          fillSuggestion(form, s);
-          setAiState(bar, "done", "Đã điền gợi ý.");
-        },
-        function (err) {
-          setAiState(bar, "error", toUserMessage(err));
-        }
-      );
+      // Pre-flight: verify the adapter is up and logged in before the (slow)
+      // chat call, so an offline/unauthed adapter fails fast (~5s).
+      setAiState(bar, "loading", "Đang kiểm tra kết nối…");
+      sendHealth()
+        .then(function (health) {
+          if (!health || !health.auth || !health.auth.configured) {
+            throw { code: "auth" };
+          }
+          setAiState(bar, "loading", "Đang tạo gợi ý…");
+          return requestSuggestion(gatherBugContext(form));
+        })
+        .then(
+          function (s) {
+            fillSuggestion(form, s);
+            setAiState(bar, "done", "Đã điền gợi ý.");
+          },
+          function (err) {
+            setAiState(bar, "error", toUserMessage(err));
+          }
+        );
     });
   }
 
