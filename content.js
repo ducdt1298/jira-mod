@@ -44,6 +44,15 @@
   // The dialog is also widened so both columns have room. Matched by label.
   var PAIR_LABELS = ["direct cause of defect", "correction action"];
 
+  // AI suggest: a button in the pair row calls the local adapter (via the
+  // background service worker) and fills the two wiki fields on demand.
+  var AI_BTN_LABEL = "✨ Gợi ý bằng AI"; // ✨ Gợi ý bằng AI
+  var AI_SUMMARY_MAX = 400; // chars of #summary-val sent as context
+  var AI_DESC_MAX = 4000; // chars of #description-val sent as context
+  // Two example values that anchor the AI's language / length / style.
+  var AI_EXAMPLE_DIRECT = "Design thiếu mô tả hoặc mô tả chưa rõ";
+  var AI_EXAMPLE_CORRECTION = "Check và fix theo đúng yêu cầu mô tả";
+
   var enabled = true; // Master switch, persisted in chrome.storage.
   var observer = new MutationObserver(schedule);
 
@@ -285,6 +294,235 @@
     pair.appendChild(right);
   }
 
+  /* ---------------------------------------------------------------------------
+   * AI suggest: fill "Direct Cause of Defect" and "Correction Action" from the
+   * bug context via the local adapter. All network I/O goes through the
+   * background service worker (the adapter sends no CORS headers, so a
+   * page-origin fetch would be blocked).
+   * ------------------------------------------------------------------------- */
+
+  // The selected option's text of a <select> (works for select2: the real
+  // hidden <select> keeps the value). "" when nothing meaningful is chosen.
+  function selectedText(root, selector) {
+    var sel = root.querySelector(selector);
+    if (!sel || sel.selectedIndex < 0) return "";
+    var opt = sel.options[sel.selectedIndex];
+    var t = opt ? opt.textContent.trim() : "";
+    return /^(none|please select\.\.\.|-- none --)$/i.test(t) ? "" : t;
+  }
+
+  // Read the bug context to feed the model. summary/description live on the
+  // issue page BEHIND the dialog (classic view); selects live in the form.
+  function gatherBugContext(form) {
+    function text(sel, cap) {
+      var el = document.querySelector(sel);
+      var v = el ? (el.innerText || el.textContent || "").trim() : "";
+      v = v.replace(/\n{3,}/g, "\n\n");
+      if (cap && v.length > cap) v = v.slice(0, cap) + " …[cắt bớt]";
+      return v;
+    }
+    return {
+      summary: text("#summary-val", AI_SUMMARY_MAX),
+      description: text("#description-val", AI_DESC_MAX),
+      resolution: selectedText(form, "#resolution"),
+      defectOrigin: selectedText(
+        form,
+        "select#customfield_10219, select[name='customfield_10219']"
+      ),
+      defectType: selectedText(
+        form,
+        "select#customfield_10220, select[name='customfield_10220']"
+      ),
+      causeCategory: selectedText(
+        form,
+        "select#customfield_10217, select[name='customfield_10217']"
+      )
+    };
+  }
+
+  // Build the OpenAI-style messages. On a repair pass, feed back the previous
+  // (invalid) raw output and the reason so the model corrects itself.
+  function buildMessages(ctx, repair) {
+    var system =
+      "Bạn là trợ lý QA. Dựa trên thông tin bug, hãy đề xuất nguyên nhân trực tiếp " +
+      "và hành động khắc phục. Trả về DUY NHẤT một JSON hợp lệ, đúng hai khóa " +
+      '"directCause" và "correctionAction". Giá trị viết bằng TIẾNG VIỆT, ngắn gọn ' +
+      "(một cụm, khoảng dưới 15 từ). Không markdown, không giải thích, không văn bản thừa. " +
+      'Ví dụ: {"directCause":"' +
+      AI_EXAMPLE_DIRECT +
+      '","correctionAction":"' +
+      AI_EXAMPLE_CORRECTION +
+      '"}';
+
+    var user =
+      "Summary: " +
+      (ctx.summary || "(không có)") +
+      "\n\nDescription:\n" +
+      (ctx.description || "(không có)") +
+      "\n\nResolution: " +
+      (ctx.resolution || "(chưa chọn)") +
+      "\nDefect Origin: " +
+      (ctx.defectOrigin || "(chưa chọn)") +
+      "\nDefect Type: " +
+      (ctx.defectType || "(chưa chọn)") +
+      "\nCause Category: " +
+      (ctx.causeCategory || "(chưa chọn)");
+
+    var messages = [
+      { role: "system", content: system },
+      { role: "user", content: user }
+    ];
+    if (repair) {
+      messages.push({ role: "assistant", content: repair.prevRaw });
+      messages.push({
+        role: "user",
+        content:
+          "Phản hồi trước không hợp lệ: " +
+          repair.error +
+          ". Trả lại DUY NHẤT JSON đúng hai khóa directCause và correctionAction."
+      });
+    }
+    return messages;
+  }
+
+  // Round-trip a chat request through the background service worker.
+  function sendChat(messages) {
+    return new Promise(function (resolve, reject) {
+      chrome.runtime.sendMessage(
+        { action: "aiSuggest", messages: messages },
+        function (resp) {
+          if (chrome.runtime.lastError) {
+            return reject({ code: "runtime", message: chrome.runtime.lastError.message });
+          }
+          if (!resp || !resp.ok) return reject((resp && resp.error) || { code: "network" });
+          resolve(resp.content);
+        }
+      );
+    });
+  }
+
+  // Pull a JSON object out of possibly-chatty model text (strip ``` fences,
+  // slice from first { to last }).
+  function extractJson(text) {
+    var t = String(text || "").replace(/```(?:json)?/gi, "");
+    var a = t.indexOf("{");
+    var b = t.lastIndexOf("}");
+    if (a === -1 || b === -1 || b < a) throw { code: "invalid", message: "không thấy JSON" };
+    return JSON.parse(t.slice(a, b + 1));
+  }
+
+  function validateSuggestion(obj) {
+    if (!obj || typeof obj !== "object") throw { code: "invalid", message: "không phải object" };
+    var d = typeof obj.directCause === "string" ? obj.directCause.trim() : "";
+    var c = typeof obj.correctionAction === "string" ? obj.correctionAction.trim() : "";
+    if (!d || !c) throw { code: "invalid", message: "thiếu directCause/correctionAction" };
+    if (d.length > 200 || c.length > 200) throw { code: "invalid", message: "giá trị quá dài" };
+    return { directCause: d, correctionAction: c };
+  }
+
+  // One AI call, then exactly one repair retry on parse/validation failure.
+  async function requestSuggestion(ctx) {
+    var raw = await sendChat(buildMessages(ctx));
+    try {
+      return validateSuggestion(extractJson(raw));
+    } catch (e1) {
+      var raw2 = await sendChat(
+        buildMessages(ctx, { prevRaw: raw, error: (e1 && e1.message) || "invalid" })
+      );
+      return validateSuggestion(extractJson(raw2));
+    }
+  }
+
+  // Write both suggestions into the two wiki textareas (overwrite on purpose).
+  // findGroupByLabel matches labels exactly, so the "(translated)" twins are
+  // never targeted; a direct-id selector is the fallback.
+  function fillSuggestion(form, s) {
+    function put(label, idSelector, value) {
+      var group = findGroupByLabel(form, label);
+      var el = group ? fieldControl(group) : form.querySelector(idSelector);
+      if (!el) return;
+      el.value = value;
+      fireEvents(el);
+    }
+    put(
+      "direct cause of defect",
+      "textarea#customfield_10206, textarea[name='customfield_10206']",
+      s.directCause
+    );
+    put(
+      "correction action",
+      "textarea#customfield_10504, textarea[name='customfield_10504']",
+      s.correctionAction
+    );
+  }
+
+  // Map an error code to a Vietnamese, user-facing message.
+  function toUserMessage(err) {
+    var code = (err && err.code) || "network";
+    switch (code) {
+      case "auth":
+        return "Phiên AI adapter hết hạn — mở app trên máy và đăng nhập lại.";
+      case "timeout":
+        return "AI phản hồi quá lâu, thử lại.";
+      case "upstream":
+      case "http":
+        return "AI tạm lỗi" + (err && err.status ? " (mã " + err.status + ")" : "") + ", thử lại sau.";
+      case "invalid":
+      case "empty":
+        return "AI trả dữ liệu không hợp lệ, thử lại.";
+      default:
+        return "Không kết nối được AI adapter — mở app trên máy rồi thử lại.";
+    }
+  }
+
+  function setAiState(bar, state, message) {
+    var btn = bar.querySelector(".jira-mod-ai-btn");
+    var status = bar.querySelector(".jira-mod-ai-status");
+    btn.classList.toggle("is-loading", state === "loading");
+    btn.disabled = state === "loading";
+    status.textContent = message || "";
+    status.classList.toggle("is-error", state === "error");
+    status.classList.toggle("is-done", state === "done");
+  }
+
+  // Insert the AI bar (button + status) just before the paired row. Idempotent
+  // per DOM presence, so it re-appears if Behaviours re-renders the form.
+  function enhanceAiFill(form) {
+    if (!looksLikeBugResolve(form)) return;
+    var pair = form.querySelector(".jira-mod-pair");
+    if (!pair) return; // enhanceLayout has not run yet; a later scan retries.
+    if (form.querySelector(".jira-mod-ai-bar")) return; // already injected
+
+    var bar = document.createElement("div");
+    bar.className = "jira-mod-ai-bar";
+
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "jira-mod-ai-btn";
+    btn.textContent = AI_BTN_LABEL;
+
+    var status = document.createElement("span");
+    status.className = "jira-mod-ai-status";
+
+    bar.appendChild(btn);
+    bar.appendChild(status);
+    pair.parentNode.insertBefore(bar, pair);
+
+    btn.addEventListener("click", function () {
+      if (btn.disabled) return;
+      setAiState(bar, "loading", "Đang tạo gợi ý…");
+      requestSuggestion(gatherBugContext(form)).then(
+        function (s) {
+          fillSuggestion(form, s);
+          setAiState(bar, "done", "Đã điền gợi ý.");
+        },
+        function (err) {
+          setAiState(bar, "error", toUserMessage(err));
+        }
+      );
+    });
+  }
+
   function processForm(form) {
     var info = syncFields(form);
     if (!form.querySelectorAll(".field-group").length) {
@@ -310,6 +548,9 @@
 
     // Widen the dialog and pair the two fields side by side (bug resolve only).
     enhanceLayout(form);
+
+    // Add the AI-suggest button to the paired row (bug resolve only).
+    enhanceAiFill(form);
   }
 
   // Undo every change on a form: remove the button, classes and markers.
@@ -322,6 +563,10 @@
     });
     form.querySelectorAll("[data-jira-mod-filled]").forEach(function (el) {
       delete el.dataset.jiraModFilled;
+    });
+    // Remove the AI-suggest bar (it is a sibling of the pair, not inside it).
+    form.querySelectorAll(".jira-mod-ai-bar").forEach(function (b) {
+      b.remove();
     });
     // Undo the side-by-side layout: move the paired fields back out, drop wrapper.
     form.querySelectorAll(".jira-mod-pair").forEach(function (pair) {
