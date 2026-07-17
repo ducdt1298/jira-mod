@@ -36,6 +36,41 @@
     { label: "Correction Action", value: "Check và fix theo đúng yêu cầu mô tả" }
   ];
 
+  // The six fields the AI analyses and fills, in display order. Each is located
+  // by its (normalized) label with a customfield-id selector as fallback.
+  //  - key:        the JSON key the model must return.
+  //  - label:      normalized field-group label (matches fieldLabel()).
+  //  - idSelector: fallback control selector when the label lookup misses.
+  //  - type:       "select" (choose an option) or "text" (free text).
+  var AI_FIELDS = [
+    { key: "resolution", label: "resolution", type: "select",
+      idSelector: "select#resolution, select[name='resolution']" },
+    { key: "defectOrigin", label: "defect origin", type: "select",
+      idSelector: "select#customfield_10219, select[name='customfield_10219']" },
+    { key: "defectType", label: "defect type", type: "select",
+      idSelector: "select#customfield_10220, select[name='customfield_10220']" },
+    { key: "causeCategory", label: "cause category", type: "select",
+      idSelector: "select#customfield_10217, select[name='customfield_10217']" },
+    { key: "directCause", label: "direct cause of defect", type: "text",
+      idSelector: "textarea#customfield_10206, textarea[name='customfield_10206']" },
+    { key: "correctionAction", label: "correction action", type: "text",
+      idSelector: "textarea#customfield_10504, textarea[name='customfield_10504']" }
+  ];
+
+  // The four dropdowns that get a per-field "fill default" button, and are
+  // grouped into a single-column, full-width block. Their default values come
+  // from AUTO_FILL (reused, single source of truth). Order matches the dialog.
+  var DEFAULT_FIELD_LABELS = [
+    "resolution",
+    "defect origin",
+    "defect type",
+    "cause category"
+  ];
+  var FIELD_LABELS = DEFAULT_FIELD_LABELS;
+
+  // Small, per-field default button (user-facing, Vietnamese).
+  var DEFAULT_BTN_LABEL = "mặc định";
+
   // Labels that mark the form as a *bug* Resolve (so we do not force Resolution
   // = Fixed on ordinary transition dialogs that lack these defect fields).
   var BUG_MARKER_LABELS = ["defect origin", "defect type", "cause category"];
@@ -46,7 +81,7 @@
 
   // AI suggest: a button in the pair row calls the local adapter (via the
   // background service worker) and fills the two wiki fields on demand.
-  var AI_BTN_LABEL = "✨ Gợi ý bằng AI"; // ✨ Gợi ý bằng AI
+  var AI_BTN_LABEL = "✨ Phân tích & điền bằng AI";
   var AI_SUMMARY_MAX = 400; // chars of #summary-val sent as context
   var AI_DESC_MAX = 4000; // chars of #description-val sent as context
   var AI_HEALTH_TIMEOUT_MS = 5000; // fast pre-flight probe before the chat call
@@ -210,6 +245,16 @@
     return true;
   }
 
+  // The configured default value for a normalized label (from AUTO_FILL), or
+  // null when the label has no default. Reused by both the on-open auto-fill
+  // and the per-field "default" buttons so there is one source of truth.
+  function defaultValueFor(normLabel) {
+    for (var i = 0; i < AUTO_FILL.length; i++) {
+      if (norm(AUTO_FILL[i].label) === normLabel) return AUTO_FILL[i].value;
+    }
+    return null;
+  }
+
   // True only when the form is a bug Resolve (has the defect-specific fields).
   function looksLikeBugResolve(form) {
     var groups = form.querySelectorAll(".field-group");
@@ -272,6 +317,48 @@
    * nodes preserves their content. Idempotent, and re-pairs if Behaviours
    * re-renders and drops our wrapper.
    */
+  /*
+   * Gather the four classification dropdowns (Resolution, Defect Origin, Defect
+   * Type, Cause Category) into a single-column, full-width block. They are
+   * contiguous field-groups near the top of the form. Moving the whole
+   * field-group keeps each field's select2 container (a sibling of the hidden
+   * <select>) intact. Idempotent, and re-groups if Behaviours re-renders and
+   * drops our wrapper.
+   */
+  function enhanceFields(form) {
+    if (!looksLikeBugResolve(form)) return;
+
+    var groups = FIELD_LABELS.map(function (l) {
+      return findGroupByLabel(form, l);
+    });
+    if (
+      groups.some(function (g) {
+        return !g;
+      })
+    ) {
+      return; // not all present yet; a later scan retries.
+    }
+
+    var block = form.querySelector(".jira-mod-fields");
+    if (
+      block &&
+      groups.every(function (g) {
+        return block.contains(g);
+      })
+    ) {
+      return; // already grouped
+    }
+    if (!block) {
+      block = document.createElement("div");
+      block.className = "jira-mod-fields";
+    }
+    // Anchor the block where the first dropdown sits, then move all four in.
+    groups[0].parentNode.insertBefore(block, groups[0]);
+    groups.forEach(function (g) {
+      block.appendChild(g);
+    });
+  }
+
   function enhanceLayout(form) {
     if (!looksLikeBugResolve(form)) return;
 
@@ -295,6 +382,42 @@
     pair.appendChild(right);
   }
 
+  /*
+   * Add a small "default" button to each of the four classification dropdowns.
+   * Clicking it re-applies that ONE field's configured default (from AUTO_FILL),
+   * overwriting whatever is there — handy after the user changed a field or the
+   * AI filled something. Independent of the on-open auto-fill, which still runs.
+   * Idempotent per field (a data-marker), so it survives Behaviours re-renders.
+   */
+  function enhanceDefaultButtons(form) {
+    if (!looksLikeBugResolve(form)) return;
+    DEFAULT_FIELD_LABELS.forEach(function (labelText) {
+      var group = findGroupByLabel(form, labelText);
+      if (!group) return;
+      if (group.querySelector("[data-jira-mod-defbtn]")) return; // already added
+      var value = defaultValueFor(labelText);
+      if (value == null) return;
+
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "aui-button aui-button-link jira-mod-def-btn";
+      btn.dataset.jiraModDefbtn = "1";
+      btn.textContent = DEFAULT_BTN_LABEL;
+      btn.title = "Điền giá trị mặc định: " + value;
+      btn.addEventListener("click", function () {
+        var el = fieldControl(group);
+        if (el && el.tagName === "SELECT") setSelect(el, value);
+      });
+
+      // Sit inline right next to the pulldown. For select2 fields the visible
+      // element is the .select2-container (the real <select> is hidden), so
+      // anchor on that; otherwise on the <select> itself.
+      var visible = group.querySelector(".select2-container") || fieldControl(group);
+      if (visible && visible.parentNode) visible.insertAdjacentElement("afterend", btn);
+      else group.appendChild(btn);
+    });
+  }
+
   /* ---------------------------------------------------------------------------
    * AI suggest: fill "Direct Cause of Defect" and "Correction Action" from the
    * bug context via the local adapter. All network I/O goes through the
@@ -312,8 +435,25 @@
     return /^(none|please select\.\.\.|-- none --)$/i.test(t) ? "" : t;
   }
 
+  // All selectable option texts of a <select> (skips None/placeholder). Fed to
+  // the model so it picks a value that actually exists in each dropdown.
+  function selectOptions(root, selector) {
+    var sel = root.querySelector(selector);
+    if (!sel) return [];
+    var out = [];
+    for (var i = 0; i < sel.options.length; i++) {
+      var t = (sel.options[i].textContent || "").trim();
+      if (!t) continue;
+      if (/^(none|please select\.\.\.|-- none --)$/i.test(t)) continue;
+      out.push(t);
+    }
+    return out;
+  }
+
   // Read the bug context to feed the model. summary/description live on the
-  // issue page BEHIND the dialog (classic view); selects live in the form.
+  // issue page BEHIND the dialog (classic view); selects live in the form. For
+  // each dropdown we also send the list of valid options so the model returns a
+  // value that maps to a real option.
   function gatherBugContext(form) {
     function text(sel, cap) {
       var el = document.querySelector(sel);
@@ -322,22 +462,22 @@
       if (cap && v.length > cap) v = v.slice(0, cap) + " …[cắt bớt]";
       return v;
     }
+    var origin = "select#customfield_10219, select[name='customfield_10219']";
+    var type = "select#customfield_10220, select[name='customfield_10220']";
+    var cause = "select#customfield_10217, select[name='customfield_10217']";
     return {
       summary: text("#summary-val", AI_SUMMARY_MAX),
       description: text("#description-val", AI_DESC_MAX),
       resolution: selectedText(form, "#resolution"),
-      defectOrigin: selectedText(
-        form,
-        "select#customfield_10219, select[name='customfield_10219']"
-      ),
-      defectType: selectedText(
-        form,
-        "select#customfield_10220, select[name='customfield_10220']"
-      ),
-      causeCategory: selectedText(
-        form,
-        "select#customfield_10217, select[name='customfield_10217']"
-      )
+      defectOrigin: selectedText(form, origin),
+      defectType: selectedText(form, type),
+      causeCategory: selectedText(form, cause),
+      options: {
+        resolution: selectOptions(form, "#resolution"),
+        defectOrigin: selectOptions(form, origin),
+        defectType: selectOptions(form, type),
+        causeCategory: selectOptions(form, cause)
+      }
     };
   }
 
@@ -345,28 +485,45 @@
   // (invalid) raw output and the reason so the model corrects itself.
   function buildMessages(ctx, repair) {
     var system =
-      "Bạn là trợ lý QA. Dựa trên thông tin bug, hãy đề xuất nguyên nhân trực tiếp " +
-      "và hành động khắc phục. Trả về DUY NHẤT một JSON hợp lệ, đúng hai khóa " +
-      '"directCause" và "correctionAction". Giá trị viết bằng TIẾNG VIỆT, ngắn gọn ' +
-      "(một cụm, khoảng dưới 15 từ). Không markdown, không giải thích, không văn bản thừa. " +
-      'Ví dụ: {"directCause":"' +
+      "Bạn là trợ lý QA. Dựa trên thông tin bug, hãy phân tích và đề xuất giá trị cho " +
+      "các trường phân loại lỗi và nguyên nhân. Trả về DUY NHẤT một JSON hợp lệ với đúng " +
+      'sáu khóa: "resolution", "defectOrigin", "defectType", "causeCategory", ' +
+      '"directCause", "correctionAction". Với bốn khóa đầu, giá trị PHẢI là một trong ' +
+      "các lựa chọn được cung cấp bên dưới (chép chính xác nguyên văn). Với " +
+      '"directCause" và "correctionAction", viết bằng TIẾNG VIỆT, ngắn gọn (một cụm, ' +
+      "khoảng dưới 15 từ). Không markdown, không giải thích, không văn bản thừa. " +
+      'Ví dụ hai khóa cuối: {"directCause":"' +
       AI_EXAMPLE_DIRECT +
       '","correctionAction":"' +
       AI_EXAMPLE_CORRECTION +
       '"}';
+
+    var opts = ctx.options || {};
+    function optList(arr) {
+      return arr && arr.length ? arr.join(" | ") : "(không có)";
+    }
 
     var user =
       "Summary: " +
       (ctx.summary || "(không có)") +
       "\n\nDescription:\n" +
       (ctx.description || "(không có)") +
-      "\n\nResolution: " +
+      "\n\nLựa chọn hợp lệ cho từng trường (chọn đúng một, chép nguyên văn):" +
+      "\n- resolution: " +
+      optList(opts.resolution) +
+      "\n- defectOrigin: " +
+      optList(opts.defectOrigin) +
+      "\n- defectType: " +
+      optList(opts.defectType) +
+      "\n- causeCategory: " +
+      optList(opts.causeCategory) +
+      "\n\nGiá trị đang chọn (nếu có): resolution=" +
       (ctx.resolution || "(chưa chọn)") +
-      "\nDefect Origin: " +
+      ", defectOrigin=" +
       (ctx.defectOrigin || "(chưa chọn)") +
-      "\nDefect Type: " +
+      ", defectType=" +
       (ctx.defectType || "(chưa chọn)") +
-      "\nCause Category: " +
+      ", causeCategory=" +
       (ctx.causeCategory || "(chưa chọn)");
 
     var messages = [
@@ -380,7 +537,8 @@
         content:
           "Phản hồi trước không hợp lệ: " +
           repair.error +
-          ". Trả lại DUY NHẤT JSON đúng hai khóa directCause và correctionAction."
+          ". Trả lại DUY NHẤT JSON đúng sáu khóa resolution, defectOrigin, " +
+          "defectType, causeCategory, directCause, correctionAction."
       });
     }
     return messages;
@@ -433,11 +591,24 @@
 
   function validateSuggestion(obj) {
     if (!obj || typeof obj !== "object") throw { code: "invalid", message: "không phải object" };
-    var d = typeof obj.directCause === "string" ? obj.directCause.trim() : "";
-    var c = typeof obj.correctionAction === "string" ? obj.correctionAction.trim() : "";
+    function str(v) {
+      return typeof v === "string" ? v.trim() : "";
+    }
+    // The two text fields anchor validity (and the repair retry). The four
+    // dropdown values are best-effort: kept if present, applied via setSelect
+    // which tolerates near-matches and silently skips anything unmatched.
+    var d = str(obj.directCause);
+    var c = str(obj.correctionAction);
     if (!d || !c) throw { code: "invalid", message: "thiếu directCause/correctionAction" };
     if (d.length > 200 || c.length > 200) throw { code: "invalid", message: "giá trị quá dài" };
-    return { directCause: d, correctionAction: c };
+    return {
+      resolution: str(obj.resolution),
+      defectOrigin: str(obj.defectOrigin),
+      defectType: str(obj.defectType),
+      causeCategory: str(obj.causeCategory),
+      directCause: d,
+      correctionAction: c
+    };
   }
 
   // One AI call, then exactly one repair retry on parse/validation failure.
@@ -453,27 +624,24 @@
     }
   }
 
-  // Write both suggestions into the two wiki textareas (overwrite on purpose).
-  // findGroupByLabel matches labels exactly, so the "(translated)" twins are
-  // never targeted; a direct-id selector is the fallback.
+  // Write all six suggestions (overwrite on purpose — this is an explicit user
+  // action). Selects go through setSelect (matches option text/value); text
+  // fields are set verbatim. findGroupByLabel matches labels exactly, so the
+  // "(translated)" twins are never targeted; the id-selector is the fallback.
   function fillSuggestion(form, s) {
-    function put(label, idSelector, value) {
-      var group = findGroupByLabel(form, label);
-      var el = group ? fieldControl(group) : form.querySelector(idSelector);
+    AI_FIELDS.forEach(function (f) {
+      var value = s[f.key];
+      if (!value) return; // dropdown the model left blank / unmatched: skip.
+      var group = findGroupByLabel(form, f.label);
+      var el = group ? fieldControl(group) : form.querySelector(f.idSelector);
       if (!el) return;
-      el.value = value;
-      fireEvents(el);
-    }
-    put(
-      "direct cause of defect",
-      "textarea#customfield_10206, textarea[name='customfield_10206']",
-      s.directCause
-    );
-    put(
-      "correction action",
-      "textarea#customfield_10504, textarea[name='customfield_10504']",
-      s.correctionAction
-    );
+      if (el.tagName === "SELECT") {
+        setSelect(el, value);
+      } else {
+        el.value = value;
+        fireEvents(el);
+      }
+    });
   }
 
   // Map an error code to a Vietnamese, user-facing message.
@@ -505,12 +673,13 @@
     status.classList.toggle("is-done", state === "done");
   }
 
-  // Insert the AI bar (button + status) just before the paired row. Idempotent
-  // per DOM presence, so it re-appears if Behaviours re-renders the form.
+  // Insert the AI bar (button + status) at the top of the form, above the
+  // classification fields. Idempotent per DOM presence, so it re-appears if
+  // Behaviours re-renders the form.
   function enhanceAiFill(form) {
     if (!looksLikeBugResolve(form)) return;
-    var pair = form.querySelector(".jira-mod-pair");
-    if (!pair) return; // enhanceLayout has not run yet; a later scan retries.
+    var block = form.querySelector(".jira-mod-fields");
+    if (!block) return; // enhanceFields has not run yet; a later scan retries.
     if (form.querySelector(".jira-mod-ai-bar")) return; // already injected
 
     var bar = document.createElement("div");
@@ -518,7 +687,7 @@
 
     var btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "jira-mod-ai-btn";
+    btn.className = "aui-button aui-button-primary jira-mod-ai-btn";
     btn.textContent = AI_BTN_LABEL;
 
     var status = document.createElement("span");
@@ -526,7 +695,9 @@
 
     bar.appendChild(btn);
     bar.appendChild(status);
-    pair.parentNode.insertBefore(bar, pair);
+    // Sit above the toggle (if present) so the AI action is the first thing seen.
+    var anchor = form.querySelector(".jira-mod-toggle-wrap") || block;
+    anchor.parentNode.insertBefore(bar, anchor);
 
     btn.addEventListener("click", function () {
       if (btn.disabled) return;
@@ -576,10 +747,15 @@
     // Fill the bug-resolve defaults (no-op on non-bug dialogs / filled fields).
     autoFillForm(form);
 
-    // Widen the dialog and pair the two fields side by side (bug resolve only).
+    // Lay out the bug Resolve dialog (bug resolve only): group the four
+    // classification dropdowns, widen the dialog and pair the two text fields.
+    enhanceFields(form);
     enhanceLayout(form);
 
-    // Add the AI-suggest button to the paired row (bug resolve only).
+    // Per-field "default" buttons on the four dropdowns.
+    enhanceDefaultButtons(form);
+
+    // Add the AI analyse-and-fill bar at the top of the form.
     enhanceAiFill(form);
   }
 
@@ -594,14 +770,17 @@
     form.querySelectorAll("[data-jira-mod-filled]").forEach(function (el) {
       delete el.dataset.jiraModFilled;
     });
-    // Remove the AI-suggest bar (it is a sibling of the pair, not inside it).
+    // Remove the AI bar and the per-field "default" buttons.
     form.querySelectorAll(".jira-mod-ai-bar").forEach(function (b) {
       b.remove();
     });
-    // Undo the side-by-side layout: move the paired fields back out, drop wrapper.
-    form.querySelectorAll(".jira-mod-pair").forEach(function (pair) {
-      while (pair.firstChild) pair.parentNode.insertBefore(pair.firstChild, pair);
-      pair.remove();
+    form.querySelectorAll("[data-jira-mod-defbtn]").forEach(function (b) {
+      b.remove();
+    });
+    // Undo the layout wrappers: move the fields back out, then drop the wrappers.
+    form.querySelectorAll(".jira-mod-fields, .jira-mod-pair").forEach(function (wrap) {
+      while (wrap.firstChild) wrap.parentNode.insertBefore(wrap.firstChild, wrap);
+      wrap.remove();
     });
     var dialog = form.closest(".aui-dialog2, .jira-dialog2");
     if (dialog) dialog.classList.remove("jira-mod-wide");
