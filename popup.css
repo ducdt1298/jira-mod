@@ -60,11 +60,6 @@ body {
   font-weight: 500;
 }
 
-.row-hint {
-  font-size: 11px;
-  color: #6b778c;
-}
-
 /* Toggle switch */
 .switch {
   position: relative;
@@ -120,13 +115,6 @@ body {
   font-size: 13px;
   font-weight: 600;
   margin: 0;
-}
-
-.card-hint {
-  margin: 2px 0 10px;
-  font-size: 11px;
-  color: #6b778c;
-  line-height: 1.4;
 }
 
 .field {

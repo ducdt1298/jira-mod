@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Jira Mod",
-  "version": "0.0.2",
+  "version": "0.2.0",
   "author": "DucDT15",
-  "description": "Streamlines Jira transition dialogs: required fields only, auto-fill, and AI suggestions when resolving bugs.",
+  "description": "Dọn dialog Jira: chỉ hiện trường bắt buộc, auto-fill + gợi ý AI khi resolve bug; thêm thanh lọc đầy đủ cho Agile board.",
   "permissions": ["storage"],
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
   "background": { "service_worker": "background.js" },
@@ -25,8 +25,20 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://insight.fsoft.com.vn/*"],
-      "js": ["content.js"],
+      "matches": ["https://insight.fsoft.com.vn/*", "https://jira.fci.vn/*"],
+      "js": [
+        "src/core/dom.js",
+        "src/core/profiles.js",
+        "src/core/features.js",
+        "src/core/ai.js",
+        "src/core/board.js",
+        "src/core/engine.js",
+        "src/features/dialog.js",
+        "src/features/board.js",
+        "src/profiles/fsoft.js",
+        "src/profiles/fci.js",
+        "src/boot.js"
+      ],
       "css": ["content.css"],
       "run_at": "document_idle"
     }

@@ -58,7 +58,7 @@
   }
 
   // Map an adapter error code (from background.js) to a Vietnamese message.
-  // Mirrors content.js toUserMessage; the two contexts are isolated so a small
+  // Mirrors src/core/ai.js toUserMessage; the two contexts are isolated so a small
   // duplication is acceptable.
   function toUserMessage(err) {
     var code = (err && err.code) || "network";

@@ -43,7 +43,9 @@ form.jira-mod-show-optional .jira-mod-toggle::before {
  * The dialog centres itself with auto left/right margins, so overriding only
  * the width keeps it centred. Two-class selector out-specifies aui-dialog2-large.
  */
-.aui-dialog2.jira-mod-wide {
+.aui-dialog2.jira-mod-wide,
+.jira-dialog2.jira-mod-wide,
+.jira-dialog.jira-mod-wide {
   width: 1140px;
   max-width: 92vw;
 }
@@ -197,4 +199,206 @@ form.jira-mod-show-optional .jira-mod-toggle::before {
 
 .jira-mod-ai-status.is-done {
   color: #006644;
+}
+
+/* ===========================================================================
+ * Board filter bar (agile board, work view)
+ * Sits under Jira's Quick Filters and narrows the cards already on the board.
+ * ======================================================================== */
+
+/* Cards and swimlanes filtered out. Class-based so Jira's own show/hide logic
+ * is untouched — nothing is removed from the DOM, nothing is disabled. */
+.ghx-issue.jira-mod-card-hidden,
+.ghx-swimlane.jira-mod-lane-hidden {
+  display: none !important;
+}
+
+/* Jira leaves a 10px margin under its Quick Filters row. With our bar directly
+ * below it that is dead space, so the row is tightened whenever we attach
+ * (the class is added by the feature and removed on revert). */
+.ghx-controls-filters.jira-mod-tight #js-work-quickfilters {
+  margin-bottom: 2px !important;
+}
+
+.jira-mod-bf {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 2px;
+  padding: 0;
+  font-size: 12px;
+}
+
+.jira-mod-bf-search {
+  width: 190px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid #dfe1e6;
+  border-radius: 3px;
+  background: #fff;
+  font-size: 12px;
+  color: #172b4d;
+}
+
+.jira-mod-bf-search:focus {
+  border-color: #4c9aff;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(76, 154, 255, 0.25);
+}
+
+/* --- Facet dropdown --- */
+.jira-mod-bf-facet {
+  position: relative;
+}
+
+.jira-mod-bf-btn {
+  height: 24px;
+  padding: 0 22px 0 8px;
+  border: 1px solid #dfe1e6;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  color: #42526e;
+  white-space: nowrap;
+}
+
+/* Caret. */
+.jira-mod-bf-btn::after {
+  content: "\25BE";
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 9px;
+  color: #6b778c;
+  pointer-events: none;
+}
+
+.jira-mod-bf-btn:hover {
+  background: #f4f5f7;
+}
+
+.jira-mod-bf-facet.is-active .jira-mod-bf-btn {
+  border-color: #0052cc;
+  background: #deebff;
+  color: #0052cc;
+  font-weight: 600;
+}
+
+/* A facet with no values on the current board (e.g. board data unavailable). */
+.jira-mod-bf-facet.is-empty .jira-mod-bf-btn {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.jira-mod-bf-panel {
+  display: none;
+  position: absolute;
+  z-index: 200;
+  top: calc(100% + 3px);
+  left: 0;
+  min-width: 220px;
+  max-width: 340px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid #dfe1e6;
+  border-radius: 3px;
+  background: #fff;
+  box-shadow: 0 4px 8px rgba(9, 30, 66, 0.25);
+}
+
+.jira-mod-bf-facet.is-open .jira-mod-bf-panel {
+  display: block;
+}
+
+.jira-mod-bf-panel-actions {
+  padding: 0 4px 6px;
+  border-bottom: 1px solid #f4f5f7;
+  margin-bottom: 4px;
+}
+
+.jira-mod-bf-panel-actions button {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 11px;
+  color: #0052cc;
+}
+
+.jira-mod-bf-panel-actions button:hover {
+  text-decoration: underline;
+}
+
+.jira-mod-bf-panel label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  line-height: 1.3;
+}
+
+.jira-mod-bf-panel label:hover {
+  background: #f4f5f7;
+}
+
+.jira-mod-bf-panel label input {
+  margin: 0;
+  flex: none;
+}
+
+/* Value text takes the room; the count is pinned right. */
+.jira-mod-bf-panel label span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #172b4d;
+}
+
+.jira-mod-bf-panel label em {
+  flex: none;
+  font-style: normal;
+  font-size: 11px;
+  color: #6b778c;
+}
+
+/* --- Trailing controls --- */
+.jira-mod-bf-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #42526e;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.jira-mod-bf-done input {
+  margin: 0;
+}
+
+.jira-mod-bf-clear {
+  height: 24px;
+  padding: 0 8px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: #6b778c;
+}
+
+.jira-mod-bf.is-active .jira-mod-bf-clear {
+  color: #0052cc;
+  font-weight: 600;
+}
+
+.jira-mod-bf-count {
+  color: #6b778c;
+  white-space: nowrap;
 }
